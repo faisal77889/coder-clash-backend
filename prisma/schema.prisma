@@ -1,0 +1,147 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  admin
+  user
+}
+
+enum Status {
+  pending_upload
+  processing
+  passed
+  failed
+}
+
+enum Difficulty {
+  easy
+  medium
+  hard
+}
+
+enum TestStatus {
+  passed
+  failed
+}
+
+model User {
+  id                Int                  @id @default(autoincrement())
+  email             String               @unique
+  name              String?
+  password          String
+  role              Role                 @default(user)
+  submissions       Submissions[]
+  contestSubmission ContestSubmissions[]
+  contestLists      contestUserRanking[]
+}
+
+model Contest {
+  id                Int                       @id @default(autoincrement())
+  title             String                    @unique
+  start_date        DateTime
+  total_questions   Int
+  total_time        Int
+  challenges        ContestChallengeMapping[]
+  contestSubmission ContestSubmissions[]
+  contestRankings   contestUserRanking[]
+}
+
+model Challenges {
+  id                 Int                       @id @default(autoincrement())
+  title              String                    @unique
+  description        String
+  packages            String
+  difficulty_level   Difficulty                @default(easy)
+  tests              Tests[]
+  submissions        Submissions[]
+  contest            ContestChallengeMapping[]
+  contestSubmissions ContestSubmissions[]
+}
+
+model Tests {
+  id                 Int                  @id @default(autoincrement())
+  s3_base_url        String
+  s3_key             String
+  points             Int
+  challenge_id       Int
+  challenge          Challenges           @relation(fields: [challenge_id], references: [id])
+  submission         SubmissionTest[]
+  contestSubmissions ContestSubmissions[]
+}
+
+model Submissions {
+  id              Int              @id @default(autoincrement())
+  user_id         Int
+  challenge_id    Int
+  s3_base_url     String?
+  s3_key          String?
+  status          Status           @default(pending_upload)
+  test_passed     Int?
+  createdAt       DateTime         @default(now())
+  challenge       Challenges       @relation(fields: [challenge_id], references: [id])
+  user            User             @relation(fields: [user_id], references: [id])
+  submissiontests SubmissionTest[]
+}
+
+model SubmissionTest {
+  id            Int         @id @default(autoincrement())
+  submission_id Int
+  test_id       Int
+  status        TestStatus
+  submissions   Submissions @relation(fields: [submission_id], references: [id])
+  tests         Tests       @relation(fields: [test_id], references: [id])
+  createdAt     DateTime    @default(now())
+}
+
+model ContestChallengeMapping {
+  id           Int        @id @default(autoincrement())
+  contest_id   Int
+  challenge_id Int
+  contest      Contest    @relation(fields: [contest_id], references: [id])
+  challenges   Challenges @relation(fields: [challenge_id], references: [id])
+
+  @@unique([contest_id, challenge_id])
+}
+
+model ContestUserMap {
+  id         Int @id @default(autoincrement())
+  contest_id Int
+  user_id    Int
+}
+
+model ContestSubmissions {
+  id           Int        @id @default(autoincrement())
+  user_id      Int
+  contest_id   Int
+  challenge_id Int
+  test_id      Int
+  time_taken   Int
+  status       Status
+  user         User       @relation(fields: [user_id], references: [id])
+  contest      Contest    @relation(fields: [contest_id], references: [id])
+  test         Tests      @relation(fields: [test_id], references: [id])
+  challenges   Challenges @relation(fields: [challenge_id], references: [id])
+}
+
+model contestUserRanking {
+  id            Int     @id @default(autoincrement())
+  user_id       Int
+  contest_id    Int
+  rank          Int
+  time_taken    Int
+  points_scored Int
+  total_points  Int
+  contest       Contest @relation(fields: [contest_id], references: [id])
+  user          User    @relation(fields: [user_id], references: [id])
+}
