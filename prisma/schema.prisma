@@ -46,16 +46,7 @@ model User {
   contestLists      contestUserRanking[]
 }
 
-model Contest {
-  id                Int                       @id @default(autoincrement())
-  title             String                    @unique
-  start_date        DateTime
-  total_questions   Int
-  total_time        Int
-  challenges        ContestChallengeMapping[]
-  contestSubmission ContestSubmissions[]
-  contestRankings   contestUserRanking[]
-}
+
 
 model Challenges {
   id                 Int                       @id @default(autoincrement())
@@ -102,6 +93,18 @@ model SubmissionTest {
   submissions   Submissions @relation(fields: [submission_id], references: [id])
   tests         Tests       @relation(fields: [test_id], references: [id])
   createdAt     DateTime    @default(now())
+}
+
+
+model Contest {
+  id                Int                       @id @default(autoincrement())
+  title             String                    @unique
+  start_date        DateTime
+  total_questions   Int
+  total_time        Int
+  challenges        ContestChallengeMapping[]
+  contestSubmission ContestSubmissions[]
+  contestRankings   contestUserRanking[]
 }
 
 model ContestChallengeMapping {

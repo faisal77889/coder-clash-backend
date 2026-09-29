@@ -1,8 +1,54 @@
 import { WebSocketServer } from 'ws';
 import Dockerode from 'dockerode';
+import http from "node:http"
+import url  from 'node:url';
+import Jwt, { type JwtPayload } from "jsonwebtoken";
 
 const docker = new Dockerode();
-const wss = new WebSocketServer({ port: 8080 });
+const wss = new WebSocketServer({ noServer : true });
+
+
+const server = http.createServer((req,res) => {
+  res.writeHead(200,{"content-type" : "text/plan"});
+  res.end("Http server is started before websocket conversion")
+})
+
+
+const authenticateUser = (req : Request,callback : any) => {
+  const parsedUrl = url.parse(req.url,true);
+  const token = parsedUrl.query.token;
+  // validate token 
+  const secret = process.env.JWT_SECRET;
+  
+    if (!token) {
+      return callback(new Error('Unauthorized'))
+    }
+  
+    try {
+      const decoded = Jwt.verify(token, secret) as JwtPayload;
+      return callback(null,decoded)
+    } catch (error) {
+      return callback(new Error('Unauthorized'));
+    }
+}
+
+
+server.on('upgrade', (request : Request, socket, head) => {
+  authenticateUser(request, (err : any, user : any) => {
+    if (err || !user) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      // Pass the authenticated user to the connection event
+      wss.emit('connection', ws, request, user);
+    });
+  });
+});
+
+
+// as sson as challenge khole user , 
 
 
 // authentication karnin
@@ -20,7 +66,7 @@ const wss = new WebSocketServer({ port: 8080 });
 
 const Idcontainers = [];
 
-wss.on('connection', async function connection(ws) {
+wss.on('connection', async function connection(ws,request, user) {
   console.log('New WebSocket connection');
 
   try {
@@ -36,6 +82,9 @@ wss.on('connection', async function connection(ws) {
 
     await container.start();
     console.log("container started with container id ", container.id);
+    // now write the logic of fetching the code from the user s3
+
+
     Idcontainers.push(container.id)
     const exec = await container.exec({
       Cmd: ['/bin/sh'],
@@ -108,4 +157,7 @@ wss.on('connection', async function connection(ws) {
   }
 });
 
-console.log('WebSocket server running on port 8080');
+
+server.listen(8080, () => {
+  console.log('Server is listening on http://localhost:8080');
+});

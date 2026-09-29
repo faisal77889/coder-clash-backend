@@ -1,11 +1,12 @@
 import { Router } from "express";
 import { prisma } from "../../prisma/lib/prisma";
+import { userAuth } from "../middleware/auth";
 
 
 const challengeRouter = Router()
 
 
-challengeRouter.get("/challenge", async (req, res) => {
+challengeRouter.get("/challenge",userAuth, async (req, res) => {
     const challengeId = req.query.challengeId as string;
     let response = null;
     try {
@@ -29,7 +30,7 @@ challengeRouter.get("/challenge", async (req, res) => {
 })
 
 
-challengeRouter.post("/challenge", async (req, res) => {
+challengeRouter.post("/challenge",userAuth, async (req, res) => {
     const { title, description, packages, difficulty } = req.body;
     if (!title || !description || !packages || !difficulty) {
         return res.status(400).json({
@@ -41,7 +42,7 @@ challengeRouter.post("/challenge", async (req, res) => {
             data: {
                 title,
                 description,
-                package: packages,
+                packages: packages,
                 difficulty_level: difficulty
             }
         })
