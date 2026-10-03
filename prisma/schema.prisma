@@ -46,13 +46,11 @@ model User {
   contestLists      contestUserRanking[]
 }
 
-
-
 model Challenges {
   id                 Int                       @id @default(autoincrement())
   title              String                    @unique
   description        String
-  packages            String
+  packages           String
   difficulty_level   Difficulty                @default(easy)
   tests              Tests[]
   submissions        Submissions[]
@@ -75,8 +73,8 @@ model Submissions {
   id              Int              @id @default(autoincrement())
   user_id         Int
   challenge_id    Int
-  s3_base_url     String?
-  s3_key          String?
+  bucket_name     String?
+  Key             String?
   status          Status           @default(pending_upload)
   test_passed     Int?
   createdAt       DateTime         @default(now())
@@ -94,7 +92,6 @@ model SubmissionTest {
   tests         Tests       @relation(fields: [test_id], references: [id])
   createdAt     DateTime    @default(now())
 }
-
 
 model Contest {
   id                Int                       @id @default(autoincrement())
