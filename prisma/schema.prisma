@@ -51,6 +51,8 @@ model Challenges {
   title              String                    @unique
   description        String
   packages           String
+  test_bucket_name   String
+  test_bucket_key    String
   difficulty_level   Difficulty                @default(easy)
   tests              Tests[]
   submissions        Submissions[]
@@ -60,8 +62,7 @@ model Challenges {
 
 model Tests {
   id                 Int                  @id @default(autoincrement())
-  s3_base_url        String
-  s3_key             String
+  test_name          String               @unique
   points             Int
   challenge_id       Int
   challenge          Challenges           @relation(fields: [challenge_id], references: [id])

@@ -24,7 +24,7 @@ interface docker_set {
 const user_challenge_set = new Set<docker_set>();
 
 
-async function pathExists(container : any, targetPath : string) {
+async function pathExists(container: any, targetPath: string) {
   try {
     const exec = await container.exec({
       Cmd: ["sh", "-c", `test -e "${targetPath}"`],
@@ -39,26 +39,26 @@ async function pathExists(container : any, targetPath : string) {
   }
 }
 
-async function createFolder(container : any, baseFolder : string, newFolder : string){
+async function createFolder(container: any, baseFolder: string, newFolder: string) {
   try {
     const fullPath = baseFolder + "/" + newFolder;
     const makeFolder = await container.exec({
-      Cmd : ["mkdir","-p",fullPath]
+      Cmd: ["mkdir", "-p", fullPath]
     })
     const stream = await makeFolder.start({});
-    await new Promise((resolve) => stream.on("end",resolve));
+    await new Promise((resolve) => stream.on("end", resolve));
 
   } catch (error) {
-    console.log("Some error occured while creating the folder",error);
+    console.log("Some error occured while creating the folder", error);
   }
 }
 
 
-async function createFile(container : any, baseFolder: string , newFile : string){
+async function createFile(container: any, baseFolder: string, newFile: string) {
   try {
     const fullFilePath = baseFolder.endsWith("/") ? baseFolder + newFile : baseFolder + "/" + newFile;
     const makeFile = await container.exec({
-      Cmd : ["touch", fullFilePath]
+      Cmd: ["touch", fullFilePath]
     });
     const stream = await makeFile.start({});
     await new Promise((resolve) => stream.on("end", resolve));
@@ -67,8 +67,8 @@ async function createFile(container : any, baseFolder: string , newFile : string
   }
 }
 
-async function listDirectory(container : any, folderPath : string) {
-  
+async function listDirectory(container: any, folderPath: string) {
+
   const exec = await container.exec({
     Cmd: ["ls", "-1", "-p", folderPath],
     AttachStdout: true,
@@ -95,7 +95,7 @@ async function listDirectory(container : any, folderPath : string) {
     .map((item) => {
       const isFolder = item.endsWith("/");
       return {
-        name: isFolder ? item.slice(0, -1) : item, 
+        name: isFolder ? item.slice(0, -1) : item,
         type: isFolder ? "folder" : "file",
       };
     });
@@ -110,13 +110,13 @@ async function getContentsOfFile(container: any, filePath: string) {
   });
 
   const stream = await exec.start({
-    hijack : true,
-    stdin : false
+    hijack: true,
+    stdin: false
   })
 
   let fileContent = ""
   let errorOutput = ""
-  
+
   const stdout = new PassThrough()
   const stderr = new PassThrough()
 
@@ -146,16 +146,16 @@ async function overwriteFile(container: any, filePath: string, newCode: string) 
 
   const entry = pack.entry(
     {
-      name: fileName,     
+      name: fileName,
       size: buffer.length,
       mode: 0o644,
     },
     buffer
   );
-  pack.finalize(); 
+  pack.finalize();
 
   await container.putArchive(pack, {
-    path: folderPath, 
+    path: folderPath,
   });
   console.log(` Overwrote ${folderPath}/${fileName} with new code!`);
 }
@@ -218,7 +218,7 @@ const wss = new WebSocketServer({ noServer: true });
 
 
 const server = http.createServer((req, res) => {
-  res.writeHead(200, { "content-type": "text/plan" });
+  res.writeHead(200, { "content-type": "text/plain" });
   res.end("Http server is started before websocket conversion")
 })
 
@@ -344,8 +344,6 @@ server.on('upgrade', (request: http.IncomingMessage, socket, head) => {
 });
 
 
-const Idcontainers: string[] = [];
-
 wss.on('connection', async function connection(ws: any, request: any, user: any, challenge: any, submission?: any) {
   console.log('New WebSocket connection');
 
@@ -384,6 +382,8 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
       docker_id: container.id,
       ws: ws
     })
+
+    // fetch the test and the dependencies
 
 
     const makeBaseAppExec = await container.exec({
@@ -425,6 +425,14 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
         console.log("some error occured", error);
       }
 
+    } else {
+      // copy package.json from the challenge packages into the app 
+      const package_json = challenge.packages;
+      if (!package_json) {
+        ws.send(JSON.stringify({ type: "error", message: "Please install vitest and supertest" }));
+      } else {
+        await overwriteFile(container, "/app/package.json", package_json);
+      }
     }
 
     const exec = await container.exec({
@@ -577,6 +585,60 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
           break;
 
         case "submit_problem":
+          try {
+
+            await saveS3FileToDocker(s3client, challenge.test_bucket_name, challenge.test_bucket_key, container.id, "/app");
+            const exec = await container.exec({
+              Cmd: ["unzip", "-o", "/app/" + challenge.test_bucket_key, "-d", "/app"],
+              AttachStdout: true,
+              AttachStderr: true,
+            });
+
+            const stream = await exec.start({ hijack: true, stdin: false });
+
+            await new Promise((resolve, reject) => {
+              container.modem.demuxStream(stream, process.stdout, process.stderr);
+              stream.on("end", resolve);
+              stream.on("error", reject);
+            });
+
+            const inspection = await exec.inspect();
+            if (inspection.ExitCode !== 0) {
+              throw new Error(`Unzip command failed with exit code ${inspection.ExitCode}`);
+            }
+            console.log(" Files unzipped successfully!");
+            const rmExec = await container.exec({
+              Cmd: ["rm", "-f", "/app/" + challenge.test_bucket_key],
+            });
+
+            await rmExec.start({});
+
+            const viteExec = await container.exec({
+              Cmd: ["npx", "vitest", "run", "--reporter=json", "--outputFile=/app/test_result.json"],
+              WorkingDir: "/app",
+              AttachStdout: true,
+              AttachStderr: true,
+            });
+
+            const viteStream = await viteExec.start({ hijack: true, stdin: false });
+
+            await new Promise((resolve, reject) => {
+              container.modem.demuxStream(viteStream, process.stdout, process.stderr);
+              viteStream.on("end", resolve);
+              viteStream.on("error", reject);
+            });
+
+            const resultsRaw = await getContentsOfFile(container, "/app/test_result.json");
+            const testResult = JSON.parse(resultsRaw);
+            console.log("Test results parsed successfully:", testResult);
+            ws.send(JSON.stringify({ type: "test_result", data: testResult }));
+
+            // save it to the db
+
+          } catch (error) {
+            console.log("some error", error);
+            ws.send(JSON.stringify({ type: "error", message: "Failed to run submission tests" }));
+          }
           break;
       }
     });
@@ -584,21 +646,29 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
     ws.on('error', console.error);
     stream.on('error', console.error);
 
-    ws.on('close', () => {
-      stream.end();
-      container.stop().catch(() => { });
-      Idcontainers.map(async (id) => {
-        const state = await docker.getContainer(id);
-        const info = await state.inspect();
+    ws.on('close', async () => {
+      try {
+        stream.end();
+      } catch { }
+
+      try {
+        const info = await container.inspect();
         if (info.State.Running) {
-
-          await docker.getContainer(id).kill();
-          console.log("Container with container id : " + id + " killed");
+          await container.kill();
+          console.log("Container with container id : " + container.id + " killed");
         } else {
-
-          console.log("Container with container id : " + id + " already killed")
+          console.log("Container with container id : " + container.id + " already killed");
         }
-      })
+        await container.remove({ force: true }).catch(() => { });
+      } catch (err) {
+        console.error("Error cleaning up container:", err);
+      }
+
+      for (const item of user_challenge_set) {
+        if (item.ws === ws) {
+          user_challenge_set.delete(item);
+        }
+      }
     });
 
   } catch (error: any) {
