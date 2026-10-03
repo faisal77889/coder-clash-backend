@@ -24,9 +24,9 @@ export async function runSpecificTest() {
     await vitest.close();
     return { success: true, results: testModules };
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error running tests:', error);
-    return { success: false, message: error.message };
+    return { success: false, message: error?.message || String(error) };
   }
 }
 

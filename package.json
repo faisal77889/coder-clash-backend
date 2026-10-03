@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "test": "vitest",
+    "typecheck": "tsc --noEmit",
+    "ws": "tsx watch ws/terminal.ts",
     "dev": "tsx watch src/server.ts",
     "build": "tsup src/server.ts --format esm --clean",
     "start": "node dist/server.js"

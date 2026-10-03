@@ -51,8 +51,8 @@ model Challenges {
   title              String                    @unique
   description        String
   packages           String
-  test_bucket_name   String
-  test_bucket_key    String
+  test_bucket_name   String?
+  test_bucket_key    String?
   difficulty_level   Difficulty                @default(easy)
   tests              Tests[]
   submissions        Submissions[]
@@ -76,6 +76,8 @@ model Submissions {
   challenge_id    Int
   bucket_name     String?
   Key             String?
+  s3_base_url     String?
+  s3_key          String?
   status          Status           @default(pending_upload)
   test_passed     Int?
   createdAt       DateTime         @default(now())

@@ -1,8 +1,9 @@
+import "dotenv/config";
 import { WebSocket, WebSocketServer } from 'ws';
-import Dockerode, { Image } from 'dockerode';
-import http from "node:http"
-import tar from "tar-stream"
-import url from 'node:url';
+import Dockerode from 'dockerode';
+import * as http from "node:http";
+import tar from "tar-stream";
+import * as url from 'node:url';
 import Jwt, { type JwtPayload } from "jsonwebtoken";
 import { ECRClient, GetAuthorizationTokenCommand } from "@aws-sdk/client-ecr";
 import { prisma } from '../prisma/lib/prisma';
@@ -29,8 +30,10 @@ async function pathExists(container: any, targetPath: string) {
     const exec = await container.exec({
       Cmd: ["sh", "-c", `test -e "${targetPath}"`],
     });
-    const stream = await exec.start({});
+    console.log("entered inside the pathExists function code")
+    const stream = await exec.start({hijack : true,Tty : true});
     await new Promise((resolve) => stream.on("end", resolve));
+    console.log("passed inside the path Exist resolve")
     const inspection = await exec.inspect();
     return inspection.ExitCode === 0;
   } catch (error) {
@@ -388,10 +391,18 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
 
     const makeBaseAppExec = await container.exec({
       Cmd: ["mkdir", "-p", "/app"],
-    })
-    const streamBase = await makeBaseAppExec.start({});
-    await new Promise((resolve) => streamBase.on("end", resolve));
+      AttachStdout: true,
+      AttachStderr: true,
 
+    })
+    console.log("first")
+    const streamBase = await makeBaseAppExec.start({ hijack: true, Tty: true });
+    console.log("second")
+    await new Promise((resolve) => {
+      streamBase.on("end", resolve)
+    });
+    // streamBase.resume();
+    console.log("third")
     if ((submission.bucket_name) && (submission.Key)) {
       try {
 
@@ -436,7 +447,7 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
     }
 
     const exec = await container.exec({
-      Cmd: ['/bin/sh'],
+      Cmd: ['/bin/sh', '-c', 'stty -echo; exec /bin/sh'],
       AttachStdout: true,
       AttachStderr: true,
       AttachStdin: true,
@@ -460,11 +471,12 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
 
     stream.on('error', (err) => {
       console.error('Stream error:', err);
-      ws.send("hello");
+      ws.send("There is some error occured in the stream");
     });
 
 
     ws.on('message', async (data: any) => {
+      console.log("the data is ", data)
       let parsed: any;
       try {
         parsed = typeof data === 'string' ? JSON.parse(data) : JSON.parse(data.toString());
@@ -476,11 +488,13 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
 
       switch (type) {
         case "terminal_command":
+          console.log("entered here in terminal command");
           if (message) {
             let cmd = typeof message === 'string' ? message : message.toString();
             if (!cmd.endsWith('\n')) {
               cmd += '\n';
             }
+            console.log("passed the if else of message")
             console.log(cmd);
             stream.write(cmd);
           }
@@ -568,14 +582,17 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
 
         case "get_nested_folder":
           // {folderName : abc}
+          console.log("entered the starting of the code")
           if (!message || !message.folderName) {
             ws.send(JSON.stringify({ type: "error", message: "Folder name is required" }));
             break;
           }
+          console.log("passed first if statement")
           if (!(await pathExists(container, message.folderName))) {
             ws.send(JSON.stringify({ type: "error", message: "Base folder is not there" }));
             break;
           }
+          console.log("passed both the if statement");
           try {
             const items = await listDirectory(container, message.folderName);
             ws.send(JSON.stringify({ type: "nested_folder", folderName: message.folderName, items }));
@@ -664,11 +681,11 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
         console.error("Error cleaning up container:", err);
       }
 
-      for (const item of user_challenge_set) {
+      user_challenge_set.forEach((item) => {
         if (item.ws === ws) {
           user_challenge_set.delete(item);
         }
-      }
+      });
     });
 
   } catch (error: any) {
