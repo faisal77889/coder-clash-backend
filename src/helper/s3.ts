@@ -3,6 +3,7 @@ import Dockerode from "dockerode"
 import { Readable } from "node:stream";
 import tar from "tar-stream"
 const docker = new Dockerode();
+import path from "node:path";
 
 const s3client = new S3Client({
     region: process.env.AWS_REGION! || "ap-south-1",
@@ -33,7 +34,7 @@ export const saveS3FileToDocker = async (client: S3Client, bucketName: string, K
         const s3Stream = response.Body;
         const pack = tar.pack();
         const entry = pack.entry({
-            name: Key,
+            name: path.basename(Key),
             size: fileSize,
             mode: 0o644,
         })

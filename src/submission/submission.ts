@@ -6,7 +6,7 @@ import path from "node:path";
 import multer from "multer";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import s3client from "../helper/s3";
-import { runSpecificTest } from "../../test/vite_program";
+// import { runSpecificTest } from "../../test/vite_program";
 import { myQueue } from "../helper/worker-config";
 
 const submissionRouter = express.Router()

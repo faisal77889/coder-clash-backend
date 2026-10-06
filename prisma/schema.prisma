@@ -51,6 +51,7 @@ model Challenges {
   title              String                    @unique
   description        String
   packages           String
+  vitest             String                    @default("")
   test_bucket_name   String?
   test_bucket_key    String?
   difficulty_level   Difficulty                @default(easy)

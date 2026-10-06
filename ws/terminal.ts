@@ -9,6 +9,7 @@ import { ECRClient, GetAuthorizationTokenCommand } from "@aws-sdk/client-ecr";
 import { prisma } from '../prisma/lib/prisma';
 import s3client, { saveS3FileToDocker } from '../src/helper/s3';
 import { PassThrough } from 'node:stream';
+import path from "node:path";
 const docker = new Dockerode();
 const TAG = "node-22-alpine";
 const IMAGE_URI = `${process.env.REGISTRY_URL}:${TAG}`;
@@ -439,10 +440,12 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
     } else {
       // copy package.json from the challenge packages into the app 
       const package_json = challenge.packages;
-      if (!package_json) {
+      const vitest_json = challenge.vitest;
+      if (!package_json || !vitest_json) {
         ws.send(JSON.stringify({ type: "error", message: "Please install vitest and supertest" }));
       } else {
         await overwriteFile(container, "/app/package.json", package_json);
+        await overwriteFile(container,"/app/vitest.config.js",vitest_json);
       }
     }
 
@@ -605,8 +608,9 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
           try {
 
             await saveS3FileToDocker(s3client, challenge.test_bucket_name, challenge.test_bucket_key, container.id, "/app");
+            const folder = path.basename(challenge.test_bucket_key);
             const exec = await container.exec({
-              Cmd: ["unzip", "-o", "/app/" + challenge.test_bucket_key, "-d", "/app"],
+              Cmd: ["unzip", "-o", "/app/" + folder, "-d", "/app"],
               AttachStdout: true,
               AttachStderr: true,
             });
@@ -625,7 +629,7 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
             }
             console.log(" Files unzipped successfully!");
             const rmExec = await container.exec({
-              Cmd: ["rm", "-f", "/app/" + challenge.test_bucket_key],
+              Cmd: ["rm", "-f", "/app/" + folder],
             });
 
             await rmExec.start({});
