@@ -17,6 +17,14 @@ enum Role {
   user
 }
 
+// two cases - > user has not submitted -> we created a new image and make it to pending_upload status 
+
+// user has submitted - passed , fail , that's simple 
+// status = pending_upload - means user has not run test button clicked , you have to pick up from the s3
+// status == processing means - > it is in processing state
+
+
+
 enum Status {
   pending_upload
   processing
@@ -63,7 +71,7 @@ model Challenges {
 
 model Tests {
   id                 Int                  @id @default(autoincrement())
-  test_name          String               @unique
+  test_name          String               
   points             Int
   challenge_id       Int
   challenge          Challenges           @relation(fields: [challenge_id], references: [id])
@@ -77,8 +85,6 @@ model Submissions {
   challenge_id    Int
   bucket_name     String?
   Key             String?
-  s3_base_url     String?
-  s3_key          String?
   status          Status           @default(pending_upload)
   test_passed     Int?
   createdAt       DateTime         @default(now())

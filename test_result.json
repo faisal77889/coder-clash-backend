@@ -1,0 +1,91 @@
+{
+    "numTotalTestSuites": 6,
+    "numPassedTestSuites": 6,
+    "numFailedTestSuites": 0,
+    "numPendingTestSuites": 0,
+    "numTotalTests": 3,
+    "numPassedTests": 3,
+    "numFailedTests": 0,
+    "numPendingTests": 0,
+    "numTodoTests": 0,
+    "snapshot": {
+        "added": 0,
+        "failure": false,
+        "filesAdded": 0,
+        "filesRemoved": 0,
+        "filesRemovedList": [],
+        "filesUnmatched": 0,
+        "filesUpdated": 0,
+        "matched": 0,
+        "total": 0,
+        "unchecked": 0,
+        "uncheckedKeysByFile": [],
+        "unmatched": 0,
+        "updated": 0,
+        "didUpdate": false
+    },
+    "startTime": 1791315741466,
+    "success": true,
+    "testResults": [
+        {
+            "assertionResults": [
+                {
+                    "ancestorTitles": [
+                        "Test 1: Registration Flow"
+                    ],
+                    "fullName": "Test 1: Registration Flow should successfully register a user and reject duplicate email with 409",
+                    "status": "passed",
+                    "title": "should successfully register a user and reject duplicate email with 409",
+                    "duration": 137.904071,
+                    "failureMessages": [],
+                    "meta": {}
+                }
+            ],
+            "startTime": 1791315743467,
+            "endTime": 1791315743604.904,
+            "status": "passed",
+            "message": "",
+            "name": "/app/test/1.test.js"
+        },
+        {
+            "assertionResults": [
+                {
+                    "ancestorTitles": [
+                        "Test 2: Login & Protected Route"
+                    ],
+                    "fullName": "Test 2: Login & Protected Route should validate credentials, issue tokens on login, and protect /me endpoint",
+                    "status": "passed",
+                    "title": "should validate credentials, issue tokens on login, and protect /me endpoint",
+                    "duration": 295.4924950000001,
+                    "failureMessages": [],
+                    "meta": {}
+                }
+            ],
+            "startTime": 1791315742023,
+            "endTime": 1791315742318.4924,
+            "status": "passed",
+            "message": "",
+            "name": "/app/test/2.test.js"
+        },
+        {
+            "assertionResults": [
+                {
+                    "ancestorTitles": [
+                        "Test 3: Refresh Token Rotation"
+                    ],
+                    "fullName": "Test 3: Refresh Token Rotation should issue a new token using refresh token and invalidate old refresh token",
+                    "status": "passed",
+                    "title": "should issue a new token using refresh token and invalidate old refresh token",
+                    "duration": 226.049529,
+                    "failureMessages": [],
+                    "meta": {}
+                }
+            ],
+            "startTime": 1791315742788,
+            "endTime": 1791315743014.0496,
+            "status": "passed",
+            "message": "",
+            "name": "/app/test/3.test.js"
+        }
+    ]
+}

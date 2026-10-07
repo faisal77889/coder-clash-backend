@@ -1,18 +1,18 @@
-import { createClient } from 'redis';
+// import { createClient } from 'redis';
 
 
-export function getRedisClient() {
+// export function getRedisClient() {
 
-    const redisClient = createClient({
-        url : process.env.REDIS_URL as string
-    }
-    );
+//     const redisClient = createClient({
+//         url : process.env.REDIS_URL as string
+//     }
+//     );
 
-    redisClient.on('error', (err) => console.error('Redis Client Error', err));
+//     redisClient.on('error', (err) => console.error('Redis Client Error', err));
 
 
-    return redisClient;
+//     return redisClient;
 
-}
+// }
 
 

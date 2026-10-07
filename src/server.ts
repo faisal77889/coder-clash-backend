@@ -5,7 +5,7 @@ import submissionRouter from "./submission/submission";
 import challengeRouter from "./challenge/challenge";
 import cors from "cors";
 import authRouter from "./auth/auth";
-import { getRedisClient } from "./helper/redisConnection";
+// import { getRedisClient } from "./helper/redisConnection";
 
 
 
@@ -30,12 +30,12 @@ app.get("/",(req,res) => {
 
 
 app.listen(3000,async () => {
-    const redisClient = getRedisClient()
-    try {
-        await redisClient.connect();
-        console.log("Connected with the redis server")
-    } catch (error) {
-        console.log("Failed to connect to redis client");
-    }
+    // const redisClient = getRedisClient()
+    // try {
+    //     await redisClient.connect();
+    //     console.log("Connected with the redis server")
+    // } catch (error) {
+    //     console.log("Failed to connect to redis client");
+    // }
     console.log("server is listening to port 3000")
 })

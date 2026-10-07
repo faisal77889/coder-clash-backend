@@ -5,4 +5,7 @@ dist/
 upload/
 uploads/
 /generated/prisma
-
+test/1.test.js
+test/2.test.js
+test/3.test.js
+test.zip

@@ -10,9 +10,12 @@ import { prisma } from '../prisma/lib/prisma';
 import s3client, { saveS3FileToDocker } from '../src/helper/s3';
 import { PassThrough } from 'node:stream';
 import path from "node:path";
+import fs from "node:fs";
+import AdmZip from "adm-zip";
+import { myQueue } from "../src/helper/worker-config";
+import "../src/submission/submissionWorker";
 const docker = new Dockerode();
-const TAG = "node-22-alpine";
-const IMAGE_URI = `${process.env.REGISTRY_URL}:${TAG}`;
+
 
 const pullingImages = new Map<string, Promise<void>>();
 
@@ -24,6 +27,9 @@ interface docker_set {
 }
 
 const user_challenge_set = new Set<docker_set>();
+
+
+
 
 
 async function pathExists(container: any, targetPath: string) {
@@ -164,6 +170,55 @@ async function overwriteFile(container: any, filePath: string, newCode: string) 
   console.log(` Overwrote ${folderPath}/${fileName} with new code!`);
 }
 
+async function zipContainerFolder(container: any, containerPath: string, localZipPath: string): Promise<string> {
+  const extract = tar.extract();
+  const zip = new AdmZip();
+
+  const archiveStream = await container.getArchive({ path: containerPath });
+
+  extract.on("entry", (header, stream, next) => {
+    let relativePath = header.name.replace(/^app\/?/, "");
+    // Skip node_modules, test_result.json, and evaluation test files
+    if (
+      !relativePath ||
+      relativePath.startsWith("node_modules/") ||
+      relativePath === "node_modules" ||
+      relativePath === "test_result.json" ||
+      relativePath.startsWith("test/") ||
+      relativePath === "test"
+    ) {
+      stream.resume();
+      return next();
+    }
+
+    if (header.type === "directory") {
+      zip.addFile(relativePath.endsWith("/") ? relativePath : relativePath + "/", Buffer.alloc(0));
+      stream.resume();
+      return next();
+    }
+
+    const chunks: Buffer[] = [];
+    stream.on("data", (chunk: any) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    stream.on("end", () => {
+      zip.addFile(relativePath, Buffer.concat(chunks));
+      next();
+    });
+    stream.on("error", (err) => next(err));
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    archiveStream.pipe(extract);
+    extract.on("finish", () => {
+      zip.writeZip(localZipPath);
+      resolve();
+    });
+    extract.on("error", reject);
+    archiveStream.on("error", reject);
+  });
+
+  return localZipPath;
+}
+
 
 async function pullImageFromECR(IMAGE_URI: string) {
   try {
@@ -282,21 +337,43 @@ async function checkImagePresent(imageName: string) {
     throw error;
   }
 }
+// one case is left here , what if the user's submission is in pending_upload and he started to connect server again 
+// then also it would create a new container
 
 
 async function getSubmission(challengeId: number, userId: number, callback: any) {
   try {
+    // 1. Look for active pending_upload submission
     let submission = await prisma.submissions.findFirst({
       where: {
         challenge_id: challengeId,
-        user_id: userId
+        user_id: userId,
+        status: "pending_upload",
+      },
+      orderBy: {
+        createdAt: "desc"
       }
     });
+
+    // 2. If no pending submission, find previous attempt (passed/failed) to restore code from
     if (!submission) {
+      const lastSubmission = await prisma.submissions.findFirst({
+        where: {
+          challenge_id: challengeId,
+          user_id: userId,
+        },
+        orderBy: {
+          createdAt: "desc"
+        }
+      });
+
       submission = await prisma.submissions.create({
         data: {
           challenge_id: challengeId,
-          user_id: userId
+          user_id: userId,
+          bucket_name: lastSubmission?.bucket_name || null,
+          Key: lastSubmission?.Key || null,
+          status: "pending_upload",
         }
       });
     }
@@ -406,10 +483,10 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
     console.log("third")
     if ((submission.bucket_name) && (submission.Key)) {
       try {
-
+        const submissionZipName = path.basename(submission.Key);
         await saveS3FileToDocker(s3client, submission.bucket_name, submission.Key, container.id, "/app");
         const exec = await container.exec({
-          Cmd: ["unzip", "-o", "/app/" + submission.Key, "-d", "/app"],
+          Cmd: ["unzip", "-o", "/app/" + submissionZipName, "-d", "/app"],
           AttachStdout: true,
           AttachStderr: true,
         });
@@ -428,7 +505,7 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
         }
         console.log(" Files unzipped successfully!");
         const rmExec = await container.exec({
-          Cmd: ["rm", "-f", "/app/" + submission.Key],
+          Cmd: ["rm", "-f", "/app/" + submissionZipName],
         });
 
         await rmExec.start({});
@@ -606,7 +683,14 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
 
         case "submit_problem":
           try {
-
+            await prisma.submissions.update({
+              where : {
+                id : submission.id
+              },
+              data : {
+                status : "processing"
+              }
+            })
             await saveS3FileToDocker(s3client, challenge.test_bucket_name, challenge.test_bucket_key, container.id, "/app");
             const folder = path.basename(challenge.test_bucket_key);
             const exec = await container.exec({
@@ -654,10 +738,44 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
             console.log("Test results parsed successfully:", testResult);
             ws.send(JSON.stringify({ type: "test_result", data: testResult }));
 
-            // save it to the db
+            // Clean up injected evaluation tests & test_result.json from container so they are not kept
+            try {
+              const cleanTestsExec = await container.exec({
+                Cmd: ["rm", "-rf", "/app/test", "/app/test_result.json"],
+              });
+              await cleanTestsExec.start({});
+            } catch (cleanupErr) {
+              console.log("Error cleaning evaluation tests from container:", cleanupErr);
+            }
+
+            // 1. Ensure upload directory exists in local storage of server
+            const uploadDir = path.join(process.cwd(), "upload");
+            if (!fs.existsSync(uploadDir)) {
+              fs.mkdirSync(uploadDir, { recursive: true });
+            }
+            const localZipPath = path.join(uploadDir, `${submission.id}.zip`);
+
+            // 2. Zip the whole /app folder and save in local storage of server
+            await zipContainerFolder(container, "/app", localZipPath);
+            console.log("App folder zipped and saved locally at:", localZipPath);
+
+            // 3. Queue the job for the worker to push to S3, update DB, and delete local zip
+            await myQueue.add("submit-problem", {
+              submission: submission,
+              result: testResult,
+              pathToZipped: localZipPath,
+            });
 
           } catch (error) {
             console.log("some error", error);
+            await prisma.submissions.update({
+              where : {
+                id : submission.id
+              },
+              data : {
+                status : "failed"
+              }
+            })
             ws.send(JSON.stringify({ type: "error", message: "Failed to run submission tests" }));
           }
           break;
@@ -671,6 +789,32 @@ wss.on('connection', async function connection(ws: any, request: any, user: any,
       try {
         stream.end();
       } catch { }
+
+      // 1. Before stopping the container, zip /app and queue worker to save to S3
+      if (submission && submission.id) {
+        try {
+          const info = await container.inspect();
+          if (info.State.Running) {
+            const uploadDir = path.join(process.cwd(), "upload");
+            if (!fs.existsSync(uploadDir)) {
+              fs.mkdirSync(uploadDir, { recursive: true });
+            }
+            const localZipPath = path.join(uploadDir, `${submission.id}.zip`);
+
+            // Zip the current app directory (overwrites previous local zip if exists)
+            await zipContainerFolder(container, "/app", localZipPath);
+            console.log(`On disconnect: successfully zipped /app to ${localZipPath}`);
+
+            // Queue save-code job to upload and overwrite ${submission.id}.zip in S3
+            await myQueue.add("save-code", {
+              submission: submission,
+              pathToZipped: localZipPath,
+            });
+          }
+        } catch (saveErr) {
+          console.error("Error saving code on disconnect:", saveErr);
+        }
+      }
 
       try {
         const info = await container.inspect();

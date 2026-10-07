@@ -105,7 +105,7 @@ submissionRouter.post("/complete/:submissionId",async (req,res)=>{
         })
     }
     
-    if(!submission || !submission.s3_key || !submission.s3_base_url){
+    if(!submission || !submission.bucket_name || !submission.Key){
         return res.status(404).json({
             "message" : "No submission found for this submission id"
         })

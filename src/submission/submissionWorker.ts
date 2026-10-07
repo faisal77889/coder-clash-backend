@@ -1,120 +1,167 @@
 import { Worker } from "bullmq";
-import s3client from "../helper/s3";
-import { ListObjectsV2Command, GetObjectCommand } from "@aws-sdk/client-s3";
-import fs, { createWriteStream } from "node:fs";
-import crypto from "crypto"
+import { uploadToS3 } from "../helper/s3";
+import fs from "node:fs";
 import { prisma } from "../../prisma/lib/prisma";
-import Docker from "dockerode"
+import path from "node:path";
+import { redisConnection } from "../helper/worker-config";
 
-const docker = new Docker()
+export const processJob = async (jobName: string, data: any) => {
+  if (jobName === "submit-problem") {
+    const jobData = typeof data === "string" ? JSON.parse(data) : data;
+    const submission = jobData.submission;
+    const test_result = jobData.result || jobData.test_result;
+    const pathOfZippedFile = jobData.pathToZipped;
 
-
-
-const worker = new Worker("myQueue", async (job) => {
-  console.log(`The job is ${job.id} and the name is ${job.name}`)
-  try {
-    const result = await processJob(job.name, job.data)
-  } catch (err) {
-
-  }
-})
-
-
-const copyS3Folder = async (base_folder: string) => {
-  const list_contents = new ListObjectsV2Command({
-    'Bucket': "dev-forces",
-    "Prefix": base_folder,
-  })
-  const lists = await s3client.send(list_contents);
-  console.log(lists.Contents)
-  return lists.Contents;
-}
-
-
-const SaveS3File = async (s3key: string) => {
-  try {
-    const command = new GetObjectCommand({
-      Bucket: "dev-forces",
-      Key: s3key
-
-    })
-    const response = await s3client.send(command)
-    const writeStream = createWriteStream(`${process.cwd()}/${s3key}`)
-    // @ts-ignore
-    response.Body.pipe(writeStream)
-    return new Promise((resolve, reject) => {
-      writeStream.on("finish", () => {
-        console.log("Successfully written")
-        resolve("/uploads")
-      })
-      writeStream.on("error", (error) => {
-        console.log("Error while writing the stream : ", error)
-        reject()
-      })
-    })
-  } catch (error) {
-    return error
-  }
-}
-
-
-const runContainer = async () => {
-  try {
-    const container = await docker.createContainer({
-      Image : "",
-      name : "my-container",
-      HostConfig : {
-        PortBindings : {
-          '3001/tcp' : [{HostPort : 8080}]
-        }
-      },
-      Cmd : ['vitest']
-    })
-    await container.start()
-    console.log("container Id : ", container.id);
-
-  } catch (error) {
-    console.error(error)
-  }
-}
-
-
-
-
-
-const processJob = async (jobName: string, data: string) => {
-  if (jobName == "evaluate") {
-
-    const submission = JSON.parse(data).submission;
-
-    const submissionZip = await SaveS3File(`problem-submission/${submission.id}`)
-
-    const testZip = await SaveS3File(`test/${submission.challenge_id}`)
-
-    const package_json = JSON.parse(fs.readFileSync(`${process.cwd()}/${submission.id}/package.json`, 'utf-8'));
-    const package_lock_json = JSON.parse(fs.readFileSync(`${process.cwd()}/${submission.id}/package-lock.json`, 'utf-8'));
-
-    const deps = {
-      dependencies: package_json.dependencies || {},
-      devDependencies: package_json.devDependencies || {}
-    };
-
-    const hash = crypto.createHash('sha256')
-      .update(JSON.stringify(deps))
-      .digest('hex');
-
-
-    if(hash){
-      // fetch from the ecr directly 
-    }else{
-      //build the image first and push to ecr
+    if (!pathOfZippedFile || !fs.existsSync(pathOfZippedFile)) {
+      console.error("Zipped file does not exist at path:", pathOfZippedFile);
+      return;
     }
 
+    // S3 Key format: ${submission_id}.zip
+    const s3Key = `${submission.id}.zip`;
 
-    await runContainer()
+    try {
+      console.log(`Uploading ${pathOfZippedFile} to S3 bucket dev-forces as ${s3Key}...`);
+      await uploadToS3(pathOfZippedFile, "dev-forces", s3Key);
 
+      // Determine passed/failed status from test results
+      const numFailed = test_result?.numFailedTests ?? (test_result?.success === false ? 1 : 0);
+      const isPassed = numFailed === 0 && (test_result?.numPassedTests ?? 0) > 0;
+      const finalStatus = isPassed ? "passed" : "failed";
 
-    // delete the zip files and folders 
+      await prisma.submissions.update({
+        where: {
+          id: submission.id,
+        },
+        data: {
+          status: finalStatus,
+          bucket_name: "dev-forces",
+          Key: s3Key,
+          test_passed: test_result?.numPassedTests ?? 0,
+        },
+      });
 
+      // Insert individual test run results into submissionTest table
+      if (test_result?.testResults && Array.isArray(test_result.testResults)) {
+        const testResultsArray = test_result.testResults.map((result: any) =>
+          path.basename(result.name)
+        );
+
+        const validTests = await prisma.tests.findMany({
+          where: {
+            challenge_id: submission.challenge_id,
+            test_name: {
+              in: testResultsArray,
+            },
+          },
+        });
+
+        const dataToInsert = validTests.map((test) => {
+          const testRequired = test_result.testResults.find(
+            (res: any) => path.basename(res.name) === path.basename(test.test_name)
+          );
+          const status = testRequired?.status === "passed" ? "passed" : "failed";
+          return {
+            submission_id: submission.id,
+            test_id: test.id,
+            status: status as "passed" | "failed",
+          };
+        });
+
+        if (dataToInsert.length > 0) {
+          // Remove previous test records for this submission to avoid duplicates
+          await prisma.submissionTest.deleteMany({
+            where: {
+              submission_id: submission.id,
+            },
+          });
+
+          await prisma.submissionTest.createMany({
+            data: dataToInsert,
+          });
+        }
+      }
+
+      console.log(`Submission ${submission.id} completed with status: ${finalStatus}`);
+    } catch (error) {
+      console.error("Error processing submission in worker:", error);
+      await prisma.submissions.update({
+        where: {
+          id: submission.id,
+        },
+        data: {
+          status: "failed",
+        },
+      });
+    } finally {
+      // Once uploaded to S3, delete the local zip file as requested
+      try {
+        if (fs.existsSync(pathOfZippedFile)) {
+          fs.unlinkSync(pathOfZippedFile);
+          console.log(`Successfully deleted local zip file: ${pathOfZippedFile}`);
+        }
+      } catch (err) {
+        console.error("Failed to delete local zip file:", err);
+      }
+    }
   }
-}
+
+  if (jobName === "save-code") {
+    const jobData = typeof data === "string" ? JSON.parse(data) : data;
+    const submission = jobData.submission;
+    const pathOfZippedFile = jobData.pathToZipped;
+
+    if (!pathOfZippedFile || !fs.existsSync(pathOfZippedFile)) {
+      console.error("Zipped file does not exist at path:", pathOfZippedFile);
+      return;
+    }
+
+    const s3Key = `${submission.id}.zip`;
+
+    try {
+      console.log(`Saving code on disconnect: uploading ${pathOfZippedFile} to S3 bucket dev-forces as ${s3Key}...`);
+      await uploadToS3(pathOfZippedFile, "dev-forces", s3Key);
+
+      await prisma.submissions.update({
+        where: {
+          id: submission.id,
+        },
+        data: {
+          bucket_name: "dev-forces",
+          Key: s3Key,
+        },
+      });
+      console.log(`Successfully saved code for submission ${submission.id} to S3 on disconnect`);
+    } catch (error) {
+      console.error("Error saving code to S3 in worker on disconnect:", error);
+    } finally {
+      try {
+        if (fs.existsSync(pathOfZippedFile)) {
+          fs.unlinkSync(pathOfZippedFile);
+          console.log(`Successfully deleted local zip file: ${pathOfZippedFile}`);
+        }
+      } catch (err) {
+        console.error("Failed to delete local zip file:", err);
+      }
+    }
+  }
+};
+
+export const submissionWorker = new Worker(
+  "evaluator",
+  async (job) => {
+    console.log(`Worker processing job ${job.id}: ${job.name}`);
+    await processJob(job.name, job.data);
+  },
+  {
+    connection: redisConnection,
+  }
+);
+
+submissionWorker.on("completed", (job) => {
+  console.log(`Job ${job.id} completed successfully`);
+});
+
+submissionWorker.on("failed", (job, err) => {
+  console.error(`Job ${job?.id} failed with error:`, err);
+});
